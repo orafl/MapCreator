@@ -5,61 +5,73 @@ import javafx.geometry.Pos
 import javafx.scene.image.ImageView
 import javafx.scene.layout.BorderPane
 import javafx.scene.layout.TilePane
-import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.awt.image.FilteredImageSource
 import java.awt.image.ImageProducer
 import java.awt.image.RGBImageFilter
-import java.net.URL
-import javax.imageio.ImageIO
-import kotlin.math.sign
-import kotlin.properties.Delegates
+import kotlin.math.max
 
 class Tileset(var srcImage: BufferedImage?, val tileSize: Int,
               val transparency1: Int, val transparency2: Int) {
-    private val cellDefaultStyle = "-fx-border-color: black; -fx-border-style: solid;"
-    private val cellSelectedStyle = "-fx-border-color: yellow; -fx-border-style: solid;"
-    val width get() = component?.prefColumns
 
-    var origin: Point? = null
-    var destiny: Point? = null
-    val selectedCells = mutableSetOf<BorderPane>()
+    var width = -1; private set
+    var height = -1; private set
 
-    /*constructor(srcUrl: URL, tileSize: Int,
-                transparency1: Int, transparency2: Int)
-            : this(ImageIO.read(srcUrl), tileSize, transparency1, transparency2)*/
+    class Cell(val view: BorderPane) : Selectable {
+
+        override fun onSelect() {
+            view.style = "-fx-border-color: yellow; -fx-border-style: solid;"
+        }
+
+        override fun unselect() {
+            view.style = "-fx-border-color: black; -fx-border-style: solid;"
+        }
+    }
+
+    private val cells = ArrayList<Cell>()
+
+    val selector = Selector<Cell>()
 
     fun createTileset() {
         val tileSrc = applyTransparency(srcImage ?: return)
         val tilesAcross = tileSrc.width / tileSize
         val tileset = tilePane(tilesAcross)
         tileset.alignment = Pos.CENTER
+        width = tileSrc.width / tileSize
+        height = tileSrc.height / tileSize
 
-        for (y in 0 until tileSrc.height step tileSize)
+        for (y in 0 until tileSrc.height step tileSize) {
             for (x in 0 until tileSrc.width step tileSize) {
-                tileset.children.add(
-                    BorderPane().apply {
-                        style = cellDefaultStyle
-                        center = ImageView(
-                            SwingFXUtils.toFXImage(
-                                tileSrc.getSubimage(x, y, tileSize, tileSize), null
-                            )
+                val b = BorderPane().apply {
+                    center = ImageView(
+                        SwingFXUtils.toFXImage(
+                            tileSrc.getSubimage(x, y, tileSize, tileSize), null
                         )
-                        tileCell(x/tileSize, y/tileSize)
-                    }
-                )
+                    )
+                    tileCell(x / tileSize, y / tileSize)
+                }
+                tileset.children.add(b)
+                cells.add(Cell(b).also { it.unselect() })
             }
+        }
         component = tileset
+        selector.maxWidth = max(width, 1)
     }
 
     var component: TilePane? = null
+    set(value) {
+        if (value == null) {
+            cells.clear()
+        }
+        field = value
+    }
 
     private fun applyTransparency(img: BufferedImage) : BufferedImage {
         val ip: ImageProducer = FilteredImageSource(img.source,
             object : RGBImageFilter() {
                 override fun filterRGB(x: Int, y: Int, rgb: Int): Int {
-                    val value = 16777216 + rgb + 1
+                    val value = 16777216 + rgb
                     if (value == transparency1 || value == transparency2) {
                         return 0x00FFFFFF and rgb
                     }
@@ -75,59 +87,18 @@ class Tileset(var srcImage: BufferedImage?, val tileSize: Int,
         return copy
     }
 
-    inline fun scanSelection(f: (Int, Int) -> Unit) {
-        val o = origin ?: return
-        val d = destiny ?: return Unit.also { f (o.x, o.y) }
-        val dx = d.x - o.x; val dy = d.y - o.y
-        var yy = 0
-
-        if (dy == 0) {
-            var xx = 0
-            while (xx != dx + dx.sign) {
-                f(xx, yy)
-                xx += dx.sign
-            }
-        }
-        else while (yy != dy + dy.sign) {
-            if (dx == 0) f(0, yy)
-            else {
-                var xx = 0
-                while (xx != dx + dx.sign) {
-                    f(xx, yy)
-                    xx += dx.sign
-                }
-            }
-            yy += dy.sign
-        }
-    }
-
     private fun BorderPane.tileCell(x: Int, y: Int) {
         setOnDragDetected { startFullDrag() }
 
         fun select() {
-            val o = origin
-            if (o == null) {
-                origin = Point(x, y)
-            } else {
-                val d = Point(x, y)
-                if (cellAt(d.x, d.y) !in selectedCells) {
-                    destiny = d
-                    scanSelection { xi, yi ->
-                        val c = cellAt(o.x + xi, o.y + yi) ?: return
-                        c.style = cellSelectedStyle
-                        selectedCells += c
-                    }
-                }
-            }
-            style = cellSelectedStyle
-            selectedCells += this
+            selector.applySelection(x, y, ::cellAt)
+            val c = cellAt(x, y) ?: return
+            c.onSelect()
+            selector.select(c)
         }
 
         fun refresh() {
-            origin = null
-            destiny = null
-            selectedCells.forEach { it.style = cellDefaultStyle }
-            selectedCells.clear()
+            selector.refresh()
             select()
         }
 
@@ -135,8 +106,9 @@ class Tileset(var srcImage: BufferedImage?, val tileSize: Int,
         setOnMouseDragEntered { select() }
     }
 
-    fun cellAt(x: Int, y: Int): BorderPane? {
-        return (component?.children?.get(x + y*(width ?: return null)) as BorderPane?)
+    fun cellAt(x: Int, y: Int): Cell? {
+        return if (width == -1) null else cells[x + y*width]
     }
 
+    fun cellAt(i: Int): Cell = cells[i]
 }

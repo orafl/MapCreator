@@ -2,13 +2,12 @@ package com.rafl.mapcr
 
 import javafx.geometry.Orientation
 import javafx.scene.Node
-import javafx.scene.control.ColorPicker
-import javafx.scene.control.TextField
-import javafx.scene.control.TextInputControl
+import javafx.scene.control.*
 import javafx.scene.image.Image
 import javafx.scene.layout.Region
 import javafx.scene.layout.TilePane
 import javafx.stage.Stage
+import kotlin.math.roundToInt
 
 fun tilePane(k: Int, o: Orientation = Orientation.HORIZONTAL) = TilePane(o)
     .apply {
@@ -37,9 +36,9 @@ fun TextInputControl.numberOnly(limit: Int) = apply {
 
 val ColorPicker.rgb: Int get()
 = value.run {
-        val r = (red * 255).toInt()
-        val g = (green * 255).toInt()
-        val b = (blue * 255).toInt()
+        val r = (red * 255).roundToInt()
+        val g = (green * 255).roundToInt()
+        val b = (blue * 255).roundToInt()
         var rgb: Int = r
         rgb = (rgb shl 8) + g
         rgb = (rgb shl 8) + b

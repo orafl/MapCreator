@@ -2,34 +2,36 @@ package com.rafl.mapcr
 
 import javafx.animation.AnimationTimer
 import javafx.collections.ListChangeListener
-import javafx.collections.ObservableList
 import javafx.geometry.Insets
 import javafx.geometry.Pos
 import javafx.scene.Scene
 import javafx.scene.control.*
 import javafx.scene.control.cell.TextFieldListCell
-import javafx.scene.input.*
+import javafx.scene.input.KeyCode
+import javafx.scene.input.KeyCodeCombination
+import javafx.scene.input.KeyCombination
 import javafx.scene.layout.*
 import javafx.scene.text.Font
 import javafx.stage.FileChooser
+import javafx.stage.WindowEvent
 import javafx.util.Callback
 import javafx.util.StringConverter
 import org.controlsfx.control.textfield.TextFields
+import java.io.File
+import java.io.FileWriter
 import java.net.MalformedURLException
 import java.net.URL
 import javax.imageio.ImageIO
 
-class Editor(tileSize: Int, mapWidth: Int, mapHeight: Int)
+class Editor(mapName: String, mapWidth: Int, mapHeight: Int)
 {
+    var mapName = mapName; private set
+    private val tilemapTileSize = 32
     val view = VBox()
-    private val emptyTileset = Tileset(null, tileSize, -1, -1)
+    private val emptyTileset = Tileset(null, tilemapTileSize, -1, -1)
 
-    private val tilemap = Tilemap(emptyTileset, tileSize, mapWidth, mapHeight)
+    val tilemap = Tilemap(tilemapTileSize, mapWidth, mapHeight)
     private var tileset = emptyTileset
-        set(value) {
-            tilemap.tileset = value
-            field = value
-        }
 
     private val tilesetNames = TabPane()
     private val selectionArea = ScrollPane()
@@ -38,6 +40,9 @@ class Editor(tileSize: Int, mapWidth: Int, mapHeight: Int)
     private var moveLayerUp = {}
     private var moveLayerDown = {}
     private var deleteLayer = {}
+    var layers = ListView<String>()
+
+    fun getTilesets() : Map<String, Tileset> = tilesets
 
     val commands = mapOf(
         KeyCodeCombination(KeyCode.Z, KeyCombination.SHORTCUT_DOWN)
@@ -50,9 +55,8 @@ class Editor(tileSize: Int, mapWidth: Int, mapHeight: Int)
                 to Runnable { scrollLayers()},
         KeyCodeCombination(KeyCode.DELETE) to Runnable { deleteLayer()})
 
-    private fun start() {
+    fun start() {
         tabControl()
-        loadTilesets(this)
 
         val map = ScrollPane(tilemap.view).apply(tilemap::zoom)
         map.setPrefSize(tilemap.view.prefWidth, tilemap.view.prefHeight)
@@ -65,10 +69,11 @@ class Editor(tileSize: Int, mapWidth: Int, mapHeight: Int)
         anchor.children.addAll(tilesetNames)
 
         val gridPane = GridPane()
+        val layerPane = layerPane()
 
         gridPane.add(VBox(5.0, anchor, selectionArea), 0, 0)
         gridPane.add(map, 1, 0)
-        gridPane.add(VBox(layerPane()), 2, 0)
+        gridPane.add(VBox(layerPane), 2, 0)
         gridPane.columnConstraints.addAll(
             ColumnConstraints(tilemap.tileSize * 8.0),
             ColumnConstraints().apply {
@@ -77,15 +82,87 @@ class Editor(tileSize: Int, mapWidth: Int, mapHeight: Int)
             ColumnConstraints()
         )
 
+        val save = Menu("Save")
+        save.setOnAction { saveMap() }
+        val load = Menu("Close")
+        load.setOnAction { closeEditor() }
+        val delete = Menu("Delete")
+        delete.setOnAction { askDeleteMap() }
+
         val menuTileset = Menu("Tilesets...")
         menuTileset.setOnAction { addTileset() }
 
         val menubar = MenuBar(
             Menu("File").apply {
+                items.addAll(save, load,delete)
+            },
+            Menu("Tile").apply {
                 items.addAll(menuTileset)
             }
         )
         view.children.addAll(menubar, gridPane)
+
+        layerPane.prefHeight = 540.0
+    }
+
+    private fun saveMap() {
+        var init = false
+        Any::class.java.getResourceAsStream("/mapnames.txt").bufferedReader()
+            .useLines { for (line in it) init = line == mapName }
+        if (!init) {
+            FileWriter(File(Any::class.java.getResource("/mapnames.txt").toURI()), true)
+                .use { it.write("$mapName\n") }
+        }
+
+        saveTilemap(this)
+    }
+
+    private fun closeEditor() {
+        val closeAndSave = ButtonType("Close and save")
+        val alert = Alert(Alert.AlertType.WARNING, "Close current map?",
+            closeAndSave, ButtonType("Just close"), ButtonType.CANCEL
+        )
+        alert.showAndWait()
+        if (alert.result == ButtonType.CANCEL) return
+        val stage = App.primaryStage ?: return
+        val scene = stage.scene ?: return
+        if (alert.result == closeAndSave) saveMap()
+        scene.root = startMenu(stage, scene)
+        stage.width = App.initialWidth
+        stage.height = App.initialHeight
+        stage.centerOnScreen()
+    }
+
+    private fun askDeleteMap() {
+        val alert = Alert(Alert.AlertType.WARNING, "Delete this map?",
+            ButtonType.YES, ButtonType.NO, ButtonType.CANCEL
+        )
+        alert.showAndWait()
+        if (alert.result == ButtonType.YES) {
+            deleteMap(this.mapName)
+
+            overwriteFile("/mapnames.txt") { lines, toWrite ->
+                lines.forEach {
+                    if (it != this.mapName) toWrite.write("$it\n")
+                }
+            }
+
+            val stage = App.primaryStage ?: return
+            val scene = stage.scene ?: return
+            scene.root = startMenu(stage, scene)
+            stage.width = App.initialWidth
+            stage.height = App.initialHeight
+            stage.centerOnScreen()
+        }
+    }
+
+    fun askSave(e: WindowEvent) {
+        val alert = Alert(Alert.AlertType.WARNING, "Save before quiting?",
+            ButtonType.YES, ButtonType.NO, ButtonType.CANCEL
+        )
+        alert.showAndWait()
+        if (alert.result == ButtonType.CANCEL) e.consume()
+        else if (alert.result == ButtonType.YES) saveMap()
     }
 
     private fun tabControl() {
@@ -94,18 +171,31 @@ class Editor(tileSize: Int, mapWidth: Int, mapHeight: Int)
                 if (new == null) {
                     selectionArea.content = emptyTileset.component
                     tileset = emptyTileset
+                    tilemap.setNoTileset()
                 } else {
-                    val newTileset = tilesets[new.text] ?: return@addListener
-                    tileset.component = null
-                    tileset = newTileset
-                    tileset.createTileset()
-                    selectionArea.content = tileset.component
+                    changeSelection(new.text)
                 }
             }
     }
 
+    private fun changeSelection(name: String) {
+        val newTileset = tilesets[name] ?: return
+        tileset.component = null
+        tileset = newTileset
+        tilemap.setTileset(name, newTileset)
+        tileset.createTileset()
+        selectionArea.content = tileset.component
+    }
+
+    fun refresh() {
+        tilesetNames.selectionModel.also {
+            if (!it.isEmpty) {
+                changeSelection(tilesets.keys.first())
+            }
+        }
+    }
+
     private fun layerPane(): VBox {
-        val layers = ListView<String>()
         layers.prefHeight = 100.0
         val layerPane = VBox(10.0,
             HBox(Label("Layers").apply { font = Font.font(20.0) })
@@ -325,6 +415,4 @@ class Editor(tileSize: Int, mapWidth: Int, mapHeight: Int)
             }
         }
     }
-
-    init { start() }
 }

@@ -62,15 +62,9 @@ fun saveTileset(name: String, tileset: Tileset) {
 }
 
 fun delete(tileset: String) {
-    val fileUri = Any::class.java.getResource("/tilesets.txt").toURI()
-    val filePath = Paths.get(fileUri)
-    val temp = filePath.resolveSibling("temp.txt").toFile()
-    val toWrite = FileWriter(temp, false)
-    val file = filePath.toFile()
-
-    file.bufferedReader().useLines {
+    overwriteFile("/tilesets.txt") { lines, toWrite ->
         var i = 0
-        val iter = it.iterator()
+        val iter = lines.iterator()
 
         while (iter.hasNext()) {
             val line = iter.next()
@@ -92,9 +86,6 @@ fun delete(tileset: String) {
             i++
         }
     }
-    toWrite.close()
-    file.delete()
-    temp.renameTo(file)
 }
 
 fun update(name: String, tileset: Tileset) {
